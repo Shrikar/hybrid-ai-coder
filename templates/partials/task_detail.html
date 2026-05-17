@@ -1,0 +1,79 @@
+<div class="detail">
+  <p><strong>ID:</strong> {{ task.taskId }}</p>
+  <p><strong>Status:</strong> {{ task.status.value if task.status else task.status }}</p>
+  <p><strong>Model:</strong> {{ task.assignedModel or "-" }}</p>
+  <p><strong>Reason:</strong> {{ task.routingReason or "-" }}</p>
+  <h3>Router Decision</h3>
+  <p><strong>Decision:</strong> {{ task.routerDecision or task.assignedModel or "-" }}</p>
+  <p>
+    <strong>Confidence:</strong>
+    {% set conf = (task.routerConfidence or 0.0) %}
+    {% set conf_pct = (conf * 100) | round(1) %}
+    <span class="confidence-badge">{{ conf_pct }}%</span>
+  </p>
+  <p><strong>Router Reason:</strong> {{ task.routerReason or "-" }}</p>
+  <p><strong>GPT Calls:</strong> {{ task.gptCallsUsed }}</p>
+  <p><strong>GPT Tokens:</strong> {{ task.gptTokenEstimate }}</p>
+  <p><strong>GPT Cost:</strong> {{ task.gptCostUsd }}</p>
+
+  {% if task.error %}
+  <p class="error"><strong>Error:</strong> {{ task.error }}</p>
+  {% endif %}
+
+  <h3>Changed Files</h3>
+  <ul>
+    {% for f in task.changedFiles %}
+    <li>{{ f }}</li>
+    {% else %}
+    <li>None</li>
+    {% endfor %}
+  </ul>
+
+  <h3>Review Panel</h3>
+  {% if review_items and review_items|length > 0 %}
+    <p><strong>Last turn:</strong>
+      {% set total_add = review_items | map(attribute='added') | map('int') | sum %}
+      {% set total_del = review_items | map(attribute='removed') | map('int') | sum %}
+      <span class="diff-add">+{{ total_add }}</span>
+      <span class="diff-del">-{{ total_del }}</span>
+    </p>
+    {% for item in review_items %}
+    <details class="review-item" {% if loop.first %}open{% endif %}>
+      <summary>
+        <span>{{ item.path }}</span>
+        <span class="file-delta"><span class="diff-add">+{{ item.added }}</span> <span class="diff-del">-{{ item.removed }}</span></span>
+      </summary>
+      <pre class="diff-block">{{ item.diff or "No textual diff available." }}</pre>
+    </details>
+    {% endfor %}
+  {% else %}
+  <p>No reviewable diffs available yet.</p>
+  {% endif %}
+
+  {% if task.requiresApproval %}
+  <h3>Pending Approval</h3>
+  <form method="post" action="/ui/tasks/{{ task.taskId }}/approve" data-action-label="Approve Changes">
+    <button type="submit" data-label="Approve and Apply">Approve and Apply</button>
+  </form>
+  <ul>
+    {% for item in approval_preview %}
+    <li>{{ item.path }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if task.status.value == 'failed' %}
+  <form method="post" action="/ui/tasks/{{ task.taskId }}/resume" data-action-label="Resume Task">
+    <button type="submit" data-label="Resume Task">Resume Task</button>
+  </form>
+  {% endif %}
+
+  <h3>Events</h3>
+  <ul>
+    {% for e in events %}
+    <li><strong>{{ e.eventType }}</strong>: {{ e.message }}</li>
+    {% else %}
+    <li>No events</li>
+    {% endfor %}
+  </ul>
+</div>

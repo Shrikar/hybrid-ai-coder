@@ -1,0 +1,28 @@
+<div class="project-step">
+  <h3>AI Clarifying Questions</h3>
+  <form
+    id="project-execute-form"
+    data-action-label="Project Plan + Task Creation"
+    data-status-id="project-status"
+    data-refresh-tasks="true"
+    hx-post="/ui/projects/execute"
+    hx-target="#project-workspace"
+    hx-swap="innerHTML"
+  >
+    <input type="hidden" name="goal" value="{{ goal }}" />
+    <input type="hidden" name="repo_path" value="{{ repo_path }}" />
+    <input type="hidden" name="mode" value="{{ mode }}" />
+
+    {% for q in questions %}
+    <label>{{ q.label }}</label>
+    <textarea name="{{ q.key }}" placeholder="{{ q.placeholder }}"></textarea>
+    {% endfor %}
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="auto_execute" value="true" checked />
+      Auto-execute generated tasks
+    </label>
+
+    <button type="submit" data-label="Plan + Create Tasks + Implement">Plan + Create Tasks + Implement</button>
+  </form>
+</div>

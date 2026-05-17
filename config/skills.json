@@ -1,0 +1,66 @@
+[
+  {
+    "id": "spring_boot_scaffold",
+    "name": "Scaffold Spring Boot",
+    "description": "Create a minimal Spring Boot project structure and starter files.",
+    "preferred_mode": "local",
+    "allowed_paths": ["src/", "pom.xml", "README.md"],
+    "template": "Create a minimal Java Spring Boot project scaffold in the target repo. Include Maven pom.xml, main application class, and a simple /hello endpoint. Allowed paths: {allowed_paths}."
+  },
+  {
+    "id": "backend_rest_crud",
+    "name": "Backend REST CRUD",
+    "description": "Create/extend REST CRUD endpoints with service and repository wiring.",
+    "preferred_mode": "auto",
+    "allowed_paths": ["src/main/", "src/test/"],
+    "template": "Implement REST CRUD for a domain resource (controller, service, repository, DTO mapping, validations, and basic tests). Keep changes within: {allowed_paths}."
+  },
+  {
+    "id": "backend_auth_jwt",
+    "name": "Backend Auth JWT",
+    "description": "Add or harden JWT-based auth and role checks with minimal surface changes.",
+    "preferred_mode": "auto",
+    "allowed_paths": ["src/main/", "src/test/", "pom.xml"],
+    "template": "Implement or fix JWT authentication and authorization guards, including token validation, role checks, and tests. Keep architecture stable and restrict edits to: {allowed_paths}."
+  },
+  {
+    "id": "frontend_component_build",
+    "name": "Frontend Component Build",
+    "description": "Build or refine a reusable frontend component with states and tests.",
+    "preferred_mode": "local",
+    "allowed_paths": ["src/", "public/", "package.json"],
+    "template": "Create or improve a reusable frontend UI component with loading, empty, error, and success states. Include accessibility basics and tests where available. Restrict edits to: {allowed_paths}."
+  },
+  {
+    "id": "frontend_bugfix_flow",
+    "name": "Frontend Bugfix Flow",
+    "description": "Fix a UI bug end-to-end with minimal, targeted changes.",
+    "preferred_mode": "auto",
+    "allowed_paths": ["src/", "styles/", "tests/"],
+    "template": "Diagnose and fix the reported frontend behavior issue with minimal scope. Add/update regression test if possible. Keep changes within: {allowed_paths}."
+  },
+  {
+    "id": "fix_failing_tests",
+    "name": "Fix Failing Tests",
+    "description": "Investigate and fix failing tests with minimal changes.",
+    "preferred_mode": "auto",
+    "allowed_paths": ["src/", "test/"],
+    "template": "Analyze failing tests and apply minimal fixes. Keep architecture unchanged. Restrict edits to: {allowed_paths}."
+  },
+  {
+    "id": "frontend_dependency_upgrade",
+    "name": "Upgrade Frontend Dependencies",
+    "description": "Update outdated frontend packages/libraries and resolve compatibility issues.",
+    "preferred_mode": "auto",
+    "allowed_paths": ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "src/", "public/", "tests/", "vite.config.*", "webpack.config.*"],
+    "template": "Upgrade outdated frontend dependencies to stable compatible versions, fix breaking API usage caused by upgrades, and keep changes minimal. Do not modify backend dependency manifests unless explicitly requested. Include a short upgrade summary in result output. Restrict edits to: {allowed_paths}."
+  },
+  {
+    "id": "backend_dependency_upgrade",
+    "name": "Upgrade Backend Dependencies",
+    "description": "Update outdated backend dependencies for Maven/Gradle/Python/Go/Rust and resolve compatibility issues.",
+    "preferred_mode": "auto",
+    "allowed_paths": ["pom.xml", "build.gradle", "build.gradle.kts", "gradle.properties", "settings.gradle", "settings.gradle.kts", "requirements.txt", "pyproject.toml", "poetry.lock", "Pipfile", "Pipfile.lock", "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "src/", "tests/", "test/"],
+    "template": "Upgrade outdated backend dependencies to stable compatible versions across Maven/Gradle/Python/Go/Rust manifests, fix breaking API usage caused by upgrades, and keep changes minimal. Do not modify frontend dependency manifests unless explicitly requested. Include a short upgrade summary in result output. Restrict edits to: {allowed_paths}."
+  }
+]

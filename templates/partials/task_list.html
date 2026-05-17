@@ -1,0 +1,25 @@
+<ul class="task-list">
+  {% for task in tasks %}
+  <li>
+    <button
+      type="button"
+      data-task-id="{{ task.taskId }}"
+      hx-get="/ui/tasks/{{ task.taskId }}"
+      hx-target="#task-detail"
+      hx-swap="innerHTML"
+      class="task-btn"
+    >
+      <strong>{{ task.taskId[:8] }}</strong>
+      <span>{{ task.status.value if task.status else task.status }}</span>
+      <small>
+        {{ task.assignedModel or '-' }}
+        {% if task.requiresApproval %}
+        <span class="pending-badge">Pending files: {{ task.pendingApprovalFileCount or 0 }}</span>
+        {% endif %}
+      </small>
+    </button>
+  </li>
+  {% else %}
+  <li>No tasks yet.</li>
+  {% endfor %}
+</ul>

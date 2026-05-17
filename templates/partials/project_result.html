@@ -1,0 +1,27 @@
+<div class="project-step">
+  <h3>Project Plan</h3>
+  <p><strong>Goal:</strong> {{ goal }}</p>
+  <pre class="project-plan">{{ plan_text }}</pre>
+
+  <h3>Generated Tasks ({{ task_prompts|length }})</h3>
+  <ol class="project-task-prompts">
+    {% for prompt in task_prompts %}
+    <li>{{ prompt.split('\n')[0] }}</li>
+    {% endfor %}
+  </ol>
+
+  <h3>Created Task Records</h3>
+  <ul>
+    {% for task in created_records %}
+    <li>
+      <strong>{{ task.taskId[:8] }}</strong> - {{ task.status.value }} - {{ task.mode.value }}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if auto_execute %}
+  <p>Execution was started for all generated tasks.</p>
+  {% else %}
+  <p>Tasks were created but not executed. Use Task History to run/resume as needed.</p>
+  {% endif %}
+</div>

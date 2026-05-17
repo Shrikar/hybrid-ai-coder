@@ -1,0 +1,351 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Hybrid AI Coder</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <main class="codex-shell">
+      <aside class="left-rail panelish">
+        <div class="rail-head">
+          <h1>Hybrid AI Coder</h1>
+          <button id="theme-toggle" type="button" class="theme-toggle" aria-label="Toggle theme">☾</button>
+        </div>
+        <nav class="left-nav">
+          <p class="nav-title">Workspace</p>
+          <button type="button" id="nav-current-chat" class="nav-item active">Current Chat</button>
+        </nav>
+        <div class="metrics stack compact">
+          <span>Total: {{ metrics.totalTasks }}</span>
+          <span>Local-only rate: {{ metrics.localOnlyRate }}</span>
+          <span>Avg GPT calls/task: {{ metrics.avgGptCallsPerTask }}</span>
+        </div>
+      </aside>
+
+      <section class="center-chat panelish">
+        <header class="center-head">Conversation</header>
+        <div class="chat-scroll">
+          {% if selected_task %}
+            <article class="msg msg-user">
+              <p>{{ selected_task.prompt }}</p>
+            </article>
+            {% for e in selected_events %}
+            <article class="msg msg-assistant">
+              <strong>{{ e.eventType }}</strong>
+              <p>{{ e.message }}</p>
+              {% if e.eventType == 'llm_output' and e.payload and e.payload.text %}
+              <pre class="llm-output">{{ e.payload.text }}</pre>
+              {% endif %}
+            </article>
+            {% endfor %}
+          {% else %}
+            <article class="msg msg-assistant">
+              <p>Describe what to build below. The system will ask clarifications, plan tasks, and execute.</p>
+            </article>
+          {% endif %}
+        </div>
+
+        <footer class="composer docked">
+          <form id="run-task-form" class="composer-form" data-action-label="Run Task" data-status-id="run-task-status" hx-post="/ui/tasks/create" hx-target="#task-list" hx-swap="innerHTML" enctype="multipart/form-data">
+            <textarea name="prompt" placeholder="Ask for follow-up changes" required></textarea>
+            <div class="composer-tools">
+              <label for="attachments" class="upload-btn">Upload Files</label>
+              <input id="attachments" type="file" name="attachments" multiple />
+              <span id="attachments-summary" class="attachment-summary">No files selected.</span>
+            </div>
+            <div class="composer-row">
+              <input type="text" name="repo_path" value="/tmp/project" required />
+              <select name="mode">
+                <option value="auto">auto</option>
+                <option value="local">local</option>
+                <option value="gpt">gpt</option>
+              </select>
+              <button type="submit" data-label="Run Task">Run Task</button>
+            </div>
+          </form>
+          <p id="run-task-status" class="action-status" aria-live="polite"></p>
+          <p id="run-skill-status" class="action-status hidden" aria-live="polite"></p>
+          <p id="project-status" class="action-status hidden" aria-live="polite"></p>
+        </footer>
+      </section>
+
+      <aside id="right-panel" class="right-panel panelish">
+        <div class="right-head collapsible-head">
+          <h2>Task History</h2>
+          <button type="button" id="task-history-toggle" class="collapse-btn" aria-expanded="true" aria-controls="task-history-body">▾</button>
+        </div>
+        <div id="task-history-body" class="task-history-body">
+          <div id="task-list" class="task-list-wrap" hx-get="/ui/tasks" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            {% include 'partials/task_list.html' %}
+          </div>
+        </div>
+
+        <div id="detail-wrap" class="detail-wrap collapsed{% if not selected_task %} hidden{% endif %}">
+          <div class="collapsible-head detail-collapsible-head">
+            <h2>Task Details</h2>
+            <button type="button" id="task-detail-toggle" class="collapse-btn" aria-expanded="false" aria-controls="task-detail-body">▴</button>
+          </div>
+          <div id="task-detail-body" class="task-detail-body collapsed">
+          <div id="task-detail">
+            {% if selected_task %}
+              {% set task = selected_task %}
+              {% set events = selected_events %}
+              {% set approval_preview = selected_preview %}
+              {% set review_items = selected_review_items %}
+              {% include 'partials/task_detail.html' %}
+            {% endif %}
+          </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+      (function () {
+        try {
+        const root = document.documentElement;
+        const themeKey = "hybrid_ai_theme";
+        const toggle = document.getElementById("theme-toggle");
+        const saved = localStorage.getItem(themeKey) || "dark";
+        root.setAttribute("data-theme", saved);
+        if (toggle) toggle.textContent = saved === "dark" ? "☀" : "☾";
+
+        if (toggle) {
+          toggle.addEventListener("click", () => {
+            const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+            root.setAttribute("data-theme", next);
+            localStorage.setItem(themeKey, next);
+            toggle.textContent = next === "dark" ? "☀" : "☾";
+          });
+        }
+
+        const attachmentsInput = document.getElementById("attachments");
+        const attachmentsSummary = document.getElementById("attachments-summary");
+        if (attachmentsInput && attachmentsSummary) {
+          attachmentsInput.addEventListener("change", () => {
+            const count = attachmentsInput.files ? attachmentsInput.files.length : 0;
+            attachmentsSummary.textContent = count === 0
+              ? "No files selected."
+              : count === 1
+                ? attachmentsInput.files[0].name
+                : count + " files selected";
+          });
+        }
+
+        const navCurrentChat = document.getElementById("nav-current-chat");
+        const chatInput = document.querySelector("#run-task-form textarea[name='prompt']");
+        const taskHistoryToggle = document.getElementById("task-history-toggle");
+        const taskHistoryBody = document.getElementById("task-history-body");
+        const detailWrap = document.getElementById("detail-wrap");
+        const taskDetailToggle = document.getElementById("task-detail-toggle");
+        const taskDetailBody = document.getElementById("task-detail-body");
+        const rightPanel = document.getElementById("right-panel");
+
+        function setNavActive(activeId) {
+          [navCurrentChat].forEach((el) => {
+            if (!el) return;
+            el.classList.toggle("active", el.id === activeId);
+          });
+        }
+
+        if (navCurrentChat && chatInput) {
+          navCurrentChat.addEventListener("click", () => {
+            setNavActive("nav-current-chat");
+            chatInput.focus();
+          });
+        }
+
+        if (taskHistoryToggle && taskHistoryBody) {
+          taskHistoryToggle.addEventListener("click", () => {
+            const collapsed = taskHistoryBody.classList.toggle("collapsed");
+            taskHistoryToggle.textContent = collapsed ? "▸" : "▾";
+            taskHistoryToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+          });
+        }
+
+        if (taskDetailToggle && taskDetailBody) {
+          taskDetailToggle.addEventListener("click", () => {
+            const collapsed = taskDetailBody.classList.toggle("collapsed");
+            if (detailWrap) detailWrap.classList.toggle("collapsed", collapsed);
+            if (rightPanel) rightPanel.classList.toggle("detail-collapsed", collapsed);
+            taskDetailToggle.textContent = collapsed ? "▴" : "▾";
+            taskDetailToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+          });
+        }
+
+        function setFormLoading(form, loading) {
+          if (!form) return;
+          const submitButtons = form.querySelectorAll('button[type="submit"]');
+          submitButtons.forEach((btn) => {
+            const label = btn.dataset.label || btn.textContent;
+            if (loading) {
+              btn.disabled = true;
+              btn.textContent = "Running...";
+            } else {
+              btn.disabled = false;
+              btn.textContent = label;
+            }
+          });
+        }
+
+        function setStatus(form, text) {
+          if (!form) return;
+          const statusId = form.dataset.statusId || null;
+          if (!statusId) return;
+          const el = document.getElementById(statusId);
+          if (el) el.textContent = text;
+        }
+
+        function showToast(text, kind) {
+          const toast = document.getElementById("toast");
+          if (!toast) return;
+          toast.className = "toast " + (kind || "info");
+          toast.textContent = text;
+          toast.hidden = false;
+          clearTimeout(window.__toastTimer);
+          window.__toastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
+        }
+
+        function renderDiffBlocks(scope) {
+          const rootScope = scope || document;
+          const blocks = rootScope.querySelectorAll(".diff-block");
+          blocks.forEach((block) => {
+            if (block.dataset.rendered === "1") return;
+            const raw = block.textContent || "";
+            const lines = raw.split("\\n");
+            let oldLn = 0;
+            let newLn = 0;
+            const rows = [];
+            let unchangedRun = 0;
+
+            function flushUnchanged() {
+              if (unchangedRun > 0) {
+                rows.push(`<tr class=\"diff-row sep\"><td colspan=\"3\">${unchangedRun} unchanged lines</td></tr>`);
+                unchangedRun = 0;
+              }
+            }
+
+            for (const line of lines) {
+              if (line.startsWith("@@")) {
+                flushUnchanged();
+                const m = /@@\\s*-(\\d+)(?:,\\d+)?\\s+\\+(\\d+)(?:,\\d+)?/.exec(line);
+                if (m) {
+                  oldLn = parseInt(m[1], 10) - 1;
+                  newLn = parseInt(m[2], 10) - 1;
+                }
+                rows.push(`<tr class=\"diff-row meta\"><td class=\"diff-ln\"></td><td class=\"diff-ln\"></td><td class=\"diff-code\">${line.replace(/</g, \"&lt;\")}</td></tr>`);
+                continue;
+              }
+              if (line.startsWith("---") || line.startsWith("+++")) {
+                flushUnchanged();
+                rows.push(`<tr class=\"diff-row meta\"><td class=\"diff-ln\"></td><td class=\"diff-ln\"></td><td class=\"diff-code\">${line.replace(/</g, \"&lt;\")}</td></tr>`);
+                continue;
+              }
+              if (line.startsWith("+")) {
+                flushUnchanged();
+                newLn += 1;
+                rows.push(`<tr class=\"diff-row add\"><td class=\"diff-ln\"></td><td class=\"diff-ln\">${newLn}</td><td class=\"diff-code\">${line.replace(/</g, \"&lt;\")}</td></tr>`);
+                continue;
+              }
+              if (line.startsWith("-")) {
+                flushUnchanged();
+                oldLn += 1;
+                rows.push(`<tr class=\"diff-row del\"><td class=\"diff-ln\">${oldLn}</td><td class=\"diff-ln\"></td><td class=\"diff-code\">${line.replace(/</g, \"&lt;\")}</td></tr>`);
+                continue;
+              }
+              if (line.startsWith(" ")) {
+                oldLn += 1;
+                newLn += 1;
+                unchangedRun += 1;
+                continue;
+              }
+              if (line.trim().length > 0) {
+                flushUnchanged();
+                rows.push(`<tr class=\"diff-row\"><td class=\"diff-ln\"></td><td class=\"diff-ln\"></td><td class=\"diff-code\">${line.replace(/</g, \"&lt;\")}</td></tr>`);
+              }
+            }
+            flushUnchanged();
+            block.innerHTML = `<table class=\"diff-table\"><tbody>${rows.join(\"\")}</tbody></table>`;
+            block.dataset.rendered = "1";
+          });
+        }
+
+        document.body.addEventListener("htmx:beforeRequest", (evt) => {
+          const form = evt.target && evt.target.closest ? evt.target.closest("form") : null;
+          if (!form) return;
+          setFormLoading(form, true);
+          const label = form.dataset.actionLabel || "Action";
+          setStatus(form, label + " in progress...");
+          showToast(label + " started", "info");
+        });
+
+        document.body.addEventListener("htmx:afterRequest", (evt) => {
+          const form = evt.target && evt.target.closest ? evt.target.closest("form") : null;
+          if (!form) return;
+          setFormLoading(form, false);
+          const label = form.dataset.actionLabel || "Action";
+          if (evt.detail && evt.detail.successful) {
+            setStatus(form, label + " submitted");
+            showToast(label + " completed", "success");
+          } else {
+            setStatus(form, label + " failed");
+            showToast(label + " failed", "error");
+          }
+        });
+
+        document.body.addEventListener("htmx:afterSwap", (evt) => {
+          if (!detailWrap) return;
+          const target = evt.detail && evt.detail.target;
+          const targetEl = document.getElementById("task-detail");
+          const isTaskDetailSwap = target === targetEl || (target && target.id === "task-detail") || target === "#task-detail";
+          if (isTaskDetailSwap) {
+            detailWrap.classList.remove("hidden");
+            if (taskDetailBody && taskDetailToggle) {
+              taskDetailBody.classList.remove("collapsed");
+              if (detailWrap) detailWrap.classList.remove("collapsed");
+              if (rightPanel) rightPanel.classList.remove("detail-collapsed");
+              taskDetailToggle.textContent = "▾";
+              taskDetailToggle.setAttribute("aria-expanded", "true");
+            }
+            renderDiffBlocks(target);
+          }
+        });
+
+        document.body.addEventListener("htmx:sendError", (evt) => {
+          const form = evt.target && evt.target.closest ? evt.target.closest("form") : null;
+          if (!form) return;
+          setFormLoading(form, false);
+          const label = form.dataset.actionLabel || "Action";
+          setStatus(form, label + " failed");
+          showToast(label + " failed: network error", "error");
+        });
+
+        // Reliable fallback for task-row clicks even after periodic HTMX list refreshes.
+        document.body.addEventListener("click", (evt) => {
+          const btn = evt.target && evt.target.closest ? evt.target.closest(".task-btn[data-task-id]") : null;
+          if (!btn) return;
+          evt.preventDefault();
+          const taskId = btn.dataset.taskId;
+          if (!taskId || typeof htmx === "undefined") return;
+          if (detailWrap) detailWrap.classList.remove("hidden");
+          if (taskDetailBody) taskDetailBody.classList.remove("collapsed");
+          if (detailWrap) detailWrap.classList.remove("collapsed");
+          if (rightPanel) rightPanel.classList.remove("detail-collapsed");
+          if (taskDetailToggle) {
+            taskDetailToggle.textContent = "▾";
+            taskDetailToggle.setAttribute("aria-expanded", "true");
+          }
+          htmx.ajax("GET", `/ui/tasks/${taskId}`, { target: "#task-detail", swap: "innerHTML" });
+        });
+        renderDiffBlocks(document);
+        } catch (err) {
+          console.error("UI bootstrap failed:", err);
+        }
+      })();
+    </script>
+  </body>
+</html>

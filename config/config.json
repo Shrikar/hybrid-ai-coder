@@ -1,0 +1,132 @@
+{
+  "active": {
+    "cloud_provider": "openai",
+    "local_provider": "ollama"
+  },
+  "storage": {
+    "task_db_path": ""
+  },
+  "providers": {
+    "openai": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "api_key_env": "OPENAI_API_KEY",
+      "base_url": "https://api.openai.com/v1",
+      "timeout": 90,
+      "pricing": {
+        "input_per_1k_usd": 0.005,
+        "output_per_1k_usd": 0.015
+      }
+    },
+    "ollama": {
+      "enabled": true,
+      "provider": "ollama",
+      "model": "qwen3-coder",
+      "base_url": "http://localhost:11434",
+      "timeout": 90
+    },
+    "azure_openai": {
+      "enabled": false,
+      "provider": "azure_openai",
+      "deployment": "gpt-5-3-codex",
+      "api_version": "2024-10-21",
+      "endpoint_env": "AZURE_OPENAI_ENDPOINT",
+      "api_key_env": "AZURE_OPENAI_API_KEY",
+      "timeout": 90,
+      "pricing": {
+        "input_per_1k_usd": 0.005,
+        "output_per_1k_usd": 0.015
+      }
+    },
+    "anthropic": {
+      "enabled": false,
+      "provider": "anthropic",
+      "model": "claude-3-7-sonnet-latest",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "base_url": "https://api.anthropic.com",
+      "timeout": 90,
+      "pricing": {
+        "input_per_1k_usd": 0.003,
+        "output_per_1k_usd": 0.015
+      }
+    },
+    "github_copilot": {
+      "enabled": false,
+      "provider": "github_copilot",
+      "model": "copilot-gpt-4.1",
+      "token_env": "GITHUB_TOKEN",
+      "note": "Use only when enterprise/copilot connector flow is configured"
+    }
+  },
+  "routing": {
+    "complexity_threshold": 50,
+    "local_retry_limit": 2,
+    "cost_optimization": true,
+    "ai_router": {
+      "enabled": true,
+      "model": "qwen3-coder",
+      "base_url": "http://localhost:11434",
+      "timeout": 20,
+      "confidence_threshold": 0.55
+    }
+  },
+  "security": {
+    "bind_host": "127.0.0.1",
+    "allow_non_localhost": false,
+    "local_api_token_env": "HYBRID_AI_LOCAL_TOKEN"
+  },
+  "validation": {
+    "commands": [],
+    "timeout_seconds": 180,
+    "stop_on_failure": true,
+    "profiles": [
+      {
+        "name": "java_maven",
+        "exists_any": ["pom.xml"],
+        "commands": ["mvn -q -DskipTests compile", "mvn -q test"],
+        "timeout_seconds": 600
+      },
+      {
+        "name": "java_gradle",
+        "exists_any": ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"],
+        "commands": ["./gradlew test"],
+        "timeout_seconds": 600
+      },
+      {
+        "name": "node",
+        "exists_any": ["package.json"],
+        "commands": ["npm run -s lint", "npm test --silent"],
+        "timeout_seconds": 420
+      },
+      {
+        "name": "python",
+        "exists_any": ["pyproject.toml", "requirements.txt"],
+        "commands": ["python3 -m pytest -q"],
+        "timeout_seconds": 420
+      }
+    ]
+  },
+  "apply_policy": {
+    "max_files_per_apply": 25,
+    "max_file_size_bytes": 200000,
+    "blocked_path_fragments": [
+      ".git/",
+      ".env",
+      "id_rsa",
+      "id_ed25519"
+    ]
+  },
+  "policy": {
+    "approval_file_threshold": 5,
+    "approval_path_keywords": [
+      "security",
+      "migration",
+      "auth",
+      "pom.xml"
+    ]
+  },
+  "webhooks": {
+    "task_events_url": ""
+  }
+}
