@@ -41,28 +41,28 @@ async def test_budget_exceeded_sets_flag_and_fails():
             )
         ]
     )
-    gpt = StubGptExecutor(
+    cloud = StubGptExecutor(
         [
             ExecutorResult(
                 result=None,
-                error="gpt failed",
-                validationSummary=ValidationSummary(passed=False, checksRun=["gpt"], failedChecks=["gpt"]),
+                error="cloud failed",
+                validationSummary=ValidationSummary(passed=False, checksRun=["cloud"], failedChecks=["cloud"]),
             ),
             ExecutorResult(
                 result=None,
-                error="gpt failed again",
-                validationSummary=ValidationSummary(passed=False, checksRun=["gpt"], failedChecks=["gpt"]),
+                error="cloud failed again",
+                validationSummary=ValidationSummary(passed=False, checksRun=["cloud"], failedChecks=["cloud"]),
             ),
         ]
     )
 
-    service = TaskExecutionService(store, router, local, gpt, local_retry_limit=0)
+    service = TaskExecutionService(store, router, local, cloud, local_retry_limit=0)
     task = await service.create_and_execute(TaskCreateRequest(prompt="architecture security task", repoPath="/tmp/repo"))
 
     assert task.status == "failed"
     assert task.budgetExceeded is True
     assert "budget exceeded" in (task.error or "").lower()
-    assert task.gptCallsUsed == 2
+    assert task.cloudCallsUsed == 2
 
 
 @pytest.mark.asyncio
@@ -72,11 +72,11 @@ async def test_local_success_stays_local_without_gpt():
     local = StubLocalExecutor(
         [ExecutorResult(result="done", validationSummary=ValidationSummary(passed=True, checksRun=["local"]))]
     )
-    gpt = StubGptExecutor([])
-    service = TaskExecutionService(store, router, local, gpt, local_retry_limit=2)
+    cloud = StubGptExecutor([])
+    service = TaskExecutionService(store, router, local, cloud, local_retry_limit=2)
 
     task = await service.create_and_execute(TaskCreateRequest(prompt="create class dto", repoPath="/tmp/repo"))
 
     assert task.status == "completed"
     assert task.assignedModel == "local"
-    assert task.gptCallsUsed == 0
+    assert task.cloudCallsUsed == 0

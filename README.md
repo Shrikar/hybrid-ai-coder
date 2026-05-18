@@ -33,7 +33,7 @@ The goal is to reduce cloud token usage without losing quality for complex engin
 - **Planner / Orchestrator**: decomposes and runs subtasks
 - **Executors**:
   - local (`OllamaExecutor`)
-  - cloud (`GPTExecutor` + provider adapters)
+  - cloud (`CloudExecutor` + provider adapters)
 - **Task Store**: persistent task/event history (SQLite)
 - **UI**: FastAPI + HTMX codex-like interface
 
@@ -60,6 +60,11 @@ python3 -m pip install -r requirements.txt
 If your repo does not include `requirements.txt`, install the core dependencies used by the app:
 ```bash
 python3 -m pip install fastapi uvicorn httpx python-dotenv jinja2 sse-starlette pytest
+```
+
+### 2b. Install embedded pi bridge dependencies (for `mode=pi`)
+```bash
+npm install
 ```
 
 ### 3. Start Ollama and pull local model
@@ -93,13 +98,35 @@ uvicorn backend.api.main:app --reload --host 127.0.0.1 --port 8001
 Open UI:
 - `http://127.0.0.1:8001/ui`
 
+## Production Packaging
+
+Install as an application package:
+
+```bash
+python3 -m pip install .
+```
+
+Run with CLI entrypoint:
+
+```bash
+hybrid-ai-coder --host 127.0.0.1 --port 8001
+```
+
+For development mode (auto-reload):
+
+```bash
+hybrid-ai-coder --host 127.0.0.1 --port 8001 --reload
+```
+
 ## How to use
 
 1. Enter prompt in the bottom composer.
 2. Choose mode:
    - `auto` (recommended): local-first with smart escalation
    - `local`: force local model only
-   - `gpt`: force cloud model
+   - `cloud`: force cloud model
+   - `pi`: force pi-based execution (when enabled in config)
+   - `gpt`: legacy alias for `cloud`
 3. Upload files if needed (text and image attachments supported).
 4. Submit task.
 5. Click a task in Task History to view:
@@ -137,17 +164,20 @@ localOnlyRate: 0.6818
 avgGptCallsPerTask: 0.23
 avgGptTokensPerTask: 0.0
 avgGptCostPerTaskUsd: 0.0
+avgCloudCallsPerTask: 0.23
+avgCloudTokensPerTask: 0.0
+avgCloudCostPerTaskUsd: 0.0
 ```
 
 What this means:
-- ~68% of tasks completed without any GPT call.
-- GPT usage is concentrated on a smaller subset of harder tasks.
+- ~68% of tasks completed without any cloud call.
+- Cloud usage is concentrated on a smaller subset of harder tasks.
 - Cost trend can be tracked per project with `/api/v1/tasks/metrics/savings/projects`.
 
 You can compare this against an always-cloud baseline by estimating:
 
 ```text
-estimated_tokens_saved = (baseline_avg_tokens_per_task - avgGptTokensPerTask) * totalTasks
+estimated_tokens_saved = (baseline_avg_tokens_per_task - avgCloudTokensPerTask) * totalTasks
 ```
 
 For example, if an always-cloud baseline is 2,000 tokens/task:
@@ -171,6 +201,12 @@ estimated_tokens_saved = (2000 - 0) * 154 = 308,000 tokens
 ### Cloud escalation not working
 - Verify `OPENAI_API_KEY` is set
 - Verify selected cloud provider config in `config/config.json`
+
+### Pi mode not working
+- Enable `routing.enable_pi_mode=true` and `pi.enabled=true` in `config/config.json`
+- Preferred in-app path: run `npm install` in project root so embedded `@earendil-works/*` packages are available
+- Optional fallback: keep `pi.allow_npx_fallback=true` and ensure `npx` is available
+- Optional direct path: install global `pi` CLI and keep it in `PATH`
 
 ### UI clicks not updating details
 - Hard refresh browser (`Cmd+Shift+R` on macOS)

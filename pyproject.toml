@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hybrid-ai-coder"
+version = "0.3.0"
+description = "Local-first hybrid AI coding orchestrator"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "Shrikar" }
+]
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.110.0,<1.0.0",
+  "uvicorn>=0.30.0,<1.0.0",
+  "httpx>=0.27.0,<1.0.0",
+  "python-dotenv>=1.0.1,<2.0.0",
+  "jinja2>=3.1.0,<4.0.0",
+  "sse-starlette>=2.1.0,<3.0.0",
+  "python-multipart>=0.0.9,<1.0.0",
+  "pydantic>=2.7.0,<3.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0,<9.0.0"
+]
+
+[project.scripts]
+hybrid-ai-coder = "backend.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
+
+[tool.setuptools.package-data]
+backend = ["py.typed"]

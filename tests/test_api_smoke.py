@@ -30,6 +30,36 @@ def test_create_list_get_task():
     assert fetched.json()["taskId"] == task_id
 
 
+def test_mode_cloud_and_legacy_gpt_alias():
+    cloud_create = client.post(
+        "/api/v1/tasks",
+        json={"prompt": "create class dto", "repoPath": "/tmp/repo", "mode": "cloud"},
+    )
+    assert cloud_create.status_code == 200
+    cloud_task_id = cloud_create.json()["taskId"]
+    cloud_task = client.get(f"/api/v1/tasks/{cloud_task_id}")
+    assert cloud_task.status_code == 200
+    assert cloud_task.json()["mode"] == "cloud"
+
+    gpt_alias_create = client.post(
+        "/api/v1/tasks",
+        json={"prompt": "create class dto", "repoPath": "/tmp/repo", "mode": "gpt"},
+    )
+    assert gpt_alias_create.status_code == 200
+    alias_task_id = gpt_alias_create.json()["taskId"]
+    alias_task = client.get(f"/api/v1/tasks/{alias_task_id}")
+    assert alias_task.status_code == 200
+    assert alias_task.json()["mode"] == "cloud"
+
+
+def test_mode_pi_accepted():
+    create = client.post(
+        "/api/v1/tasks",
+        json={"prompt": "create class dto", "repoPath": "/tmp/repo", "mode": "pi"},
+    )
+    assert create.status_code == 200
+
+
 def test_savings_metrics_endpoint():
     response = client.get("/api/v1/tasks/metrics/savings")
     assert response.status_code == 200

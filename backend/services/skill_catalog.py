@@ -36,7 +36,7 @@ class SkillCatalog:
         mode = TaskMode.auto
         if mode_str == "local":
             mode = TaskMode.local
-        elif mode_str == "gpt":
-            mode = TaskMode.gpt
+        elif mode_str in {"gpt", "cloud"}:
+            mode = TaskMode.cloud
 
         return TaskCreateRequest(prompt=prompt, repoPath=repo_path, mode=mode)

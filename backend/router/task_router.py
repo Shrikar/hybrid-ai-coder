@@ -9,7 +9,7 @@ from backend.models.task_models import TaskMode
 
 @dataclass
 class BudgetPolicy:
-    maxGptCalls: int = 2
+    maxCloudCalls: int = 2
     maxContextFiles: int = 12
     maxPromptTokens: int = 2500
 
@@ -50,11 +50,17 @@ class TaskRouter:
         self,
         complexity_threshold: int = 50,
         local_retry_limit: int = 2,
+        max_cloud_calls: int = 2,
+        enable_pi_mode: bool = False,
+        auto_use_pi: bool = False,
         ai_executor: Optional[AIRouterExecutor] = None,
         ai_confidence_threshold: float = 0.55,
     ):
         self.complexity_threshold = complexity_threshold
         self.local_retry_limit = local_retry_limit
+        self.max_cloud_calls = max_cloud_calls
+        self.enable_pi_mode = enable_pi_mode
+        self.auto_use_pi = auto_use_pi
         self.ai_executor = ai_executor
         self.ai_confidence_threshold = ai_confidence_threshold
 
@@ -64,12 +70,16 @@ class TaskRouter:
         mode: TaskMode,
         riskHints: Optional[list[str]] = None,
         retryCount: int = 0,
-        gptCallsUsed: int = 0,
+        cloudCallsUsed: int = 0,
     ) -> RouteDecision:
         budget = self.budget_policy()
 
-        if mode == TaskMode.gpt:
-            return RouteDecision("gpt", "explicit_mode_gpt", 1.0, 100, budget)
+        if mode in {TaskMode.gpt, TaskMode.cloud}:
+            return RouteDecision("cloud", "explicit_mode_cloud", 1.0, 100, budget)
+        if mode == TaskMode.pi:
+            if self.enable_pi_mode:
+                return RouteDecision("pi", "explicit_mode_pi", 1.0, 100, budget)
+            return RouteDecision("local", "pi_mode_disabled_fallback_local", 1.0, 0, budget)
         if mode == TaskMode.local:
             return RouteDecision("local", "explicit_mode_local", 1.0, 0, budget)
 
@@ -77,15 +87,17 @@ class TaskRouter:
         score = self._complexity_score(prompt, hints)
         high_risk = self._is_high_risk(prompt, hints)
 
-        if gptCallsUsed >= budget.maxGptCalls:
-            return RouteDecision("local", "gpt_budget_exhausted", 1.0, score, budget)
+        if cloudCallsUsed >= budget.maxCloudCalls:
+            return RouteDecision("local", "cloud_budget_exhausted", 1.0, score, budget)
 
         if retryCount >= self.local_retry_limit:
-            return RouteDecision("gpt", "local_retry_limit_exceeded", 1.0, score, budget)
+            if self.enable_pi_mode and self.auto_use_pi:
+                return RouteDecision("pi", "local_retry_limit_exceeded_pi_assist", 1.0, score, budget)
+            return RouteDecision("cloud", "local_retry_limit_exceeded", 1.0, score, budget)
 
-        ai_decision = await self._route_with_ai(prompt, mode, hints, retryCount, gptCallsUsed)
+        ai_decision = await self._route_with_ai(prompt, mode, hints, retryCount, cloudCallsUsed)
         if ai_decision is not None:
-            if ai_decision.model == "gpt" and high_risk and score < self.complexity_threshold:
+            if ai_decision.model == "cloud" and high_risk and score < self.complexity_threshold:
                 # Keep local-first when risk-only mention is weak.
                 return RouteDecision("local", "ai_low_complexity_local_guard", ai_decision.confidence, score, budget)
             return RouteDecision(
@@ -97,12 +109,12 @@ class TaskRouter:
             )
 
         if high_risk and score >= self.complexity_threshold:
-            return RouteDecision("gpt", "high_risk_and_high_complexity", 0.75, score, budget)
+            return RouteDecision("cloud", "high_risk_and_high_complexity", 0.75, score, budget)
 
         return RouteDecision("local", "local_first_default", 0.65, score, budget)
 
     def budget_policy(self) -> BudgetPolicy:
-        return BudgetPolicy()
+        return BudgetPolicy(maxCloudCalls=self.max_cloud_calls)
 
     def _complexity_score(self, prompt: str, risk_hints: list[str]) -> int:
         text = prompt.lower()
@@ -127,7 +139,7 @@ class TaskRouter:
         mode: TaskMode,
         risk_hints: list[str],
         retry_count: int,
-        gpt_calls_used: int,
+        cloud_calls_used: int,
     ):
         if self.ai_executor is None:
             return None
@@ -137,7 +149,7 @@ class TaskRouter:
                 mode=mode.value,
                 risk_hints=risk_hints,
                 retry_count=retry_count,
-                gpt_calls_used=gpt_calls_used,
+                cloud_calls_used=cloud_calls_used,
             )
             if decision.confidence < self.ai_confidence_threshold:
                 return None

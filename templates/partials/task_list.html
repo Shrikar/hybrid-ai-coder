@@ -1,12 +1,9 @@
 <ul class="task-list">
   {% for task in tasks %}
   <li>
-    <button
-      type="button"
+    <a
+      href="/ui?task_id={{ task.taskId }}"
       data-task-id="{{ task.taskId }}"
-      hx-get="/ui/tasks/{{ task.taskId }}"
-      hx-target="#task-detail"
-      hx-swap="innerHTML"
       class="task-btn"
     >
       <strong>{{ task.taskId[:8] }}</strong>
@@ -17,7 +14,7 @@
         <span class="pending-badge">Pending files: {{ task.pendingApprovalFileCount or 0 }}</span>
         {% endif %}
       </small>
-    </button>
+    </a>
   </li>
   {% else %}
   <li>No tasks yet.</li>

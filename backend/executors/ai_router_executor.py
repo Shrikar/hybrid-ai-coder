@@ -29,22 +29,22 @@ class AIRouterExecutor:
         mode: str,
         risk_hints: list[str],
         retry_count: int,
-        gpt_calls_used: int,
+        cloud_calls_used: int,
     ) -> RouterDecision:
         if not self.enabled:
             raise RuntimeError("ai_router_disabled")
 
         system = (
-            "You are a task router. Decide if a coding task should use local or gpt model. "
+            "You are a task router. Decide if a coding task should use local or cloud model. "
             "Return only strict JSON with keys: model, confidence, reason, complexity. "
-            "model must be local or gpt. confidence is 0..1, complexity is 0..100."
+            "model must be local or cloud. confidence is 0..1, complexity is 0..100."
         )
         user = {
             "prompt": prompt,
             "mode": mode,
             "riskHints": risk_hints,
             "retryCount": retry_count,
-            "gptCallsUsed": gpt_calls_used,
+            "cloudCallsUsed": cloud_calls_used,
             "policy": "Prefer local unless task is clearly high-complexity/high-risk.",
         }
         payload = {
@@ -61,7 +61,9 @@ class AIRouterExecutor:
         raw = (data.get("response", "") or "").strip()
         parsed = json.loads(raw)
         model = str(parsed.get("model", "local")).strip().lower()
-        if model not in {"local", "gpt"}:
+        if model == "gpt":
+            model = "cloud"
+        if model not in {"local", "cloud"}:
             model = "local"
         confidence = float(parsed.get("confidence", 0.5))
         confidence = min(1.0, max(0.0, confidence))

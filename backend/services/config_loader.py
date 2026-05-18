@@ -4,11 +4,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.runtime_paths import config_path as default_config_path
+
 
 class ConfigLoader:
     def __init__(self, config_path: str | None = None) -> None:
-        default_path = Path(__file__).resolve().parents[2] / "config" / "config.json"
-        self.config_path = Path(config_path) if config_path else default_path
+        self.config_path = Path(config_path) if config_path else default_config_path()
 
     def load(self) -> dict[str, Any]:
         if not self.config_path.exists():

@@ -13,7 +13,7 @@ class Subtask:
 class SubtaskPlanner:
     """Simple local-first planner that decomposes tasks into execution subtasks."""
 
-    GPT_HINTS = {
+    CLOUD_HINTS = {
         "vaadin",
         "ui wiring",
         "security design",
@@ -33,7 +33,7 @@ class SubtaskPlanner:
 
         subtasks: list[Subtask] = []
         for idx, part in enumerate(parts, start=1):
-            preferred = "gpt" if self._needs_gpt(part.lower()) else "local"
+            preferred = "cloud" if self._needs_cloud(part.lower()) else "local"
             subtasks.append(
                 Subtask(
                     title=f"subtask_{idx}",
@@ -46,10 +46,10 @@ class SubtaskPlanner:
             subtasks.append(Subtask(title="subtask_1", prompt=text, preferred_model="local"))
 
         # Local-first default for generic prompts.
-        if len(subtasks) == 1 and not self._needs_gpt(low):
+        if len(subtasks) == 1 and not self._needs_cloud(low):
             subtasks[0].preferred_model = "local"
 
         return subtasks
 
-    def _needs_gpt(self, text: str) -> bool:
-        return any(hint in text for hint in self.GPT_HINTS)
+    def _needs_cloud(self, text: str) -> bool:
+        return any(hint in text for hint in self.CLOUD_HINTS)

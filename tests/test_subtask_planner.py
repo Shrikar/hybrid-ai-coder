@@ -9,7 +9,7 @@ def test_planner_splits_then_and_sets_preferences():
 
     assert len(subtasks) == 2
     assert subtasks[0].preferred_model == "local"
-    assert subtasks[1].preferred_model == "gpt"
+    assert subtasks[1].preferred_model == "cloud"
 
 
 def test_planner_local_first_for_generic_prompt():

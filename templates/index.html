@@ -22,7 +22,7 @@
         <div class="metrics stack compact">
           <span>Total: {{ metrics.totalTasks }}</span>
           <span>Local-only rate: {{ metrics.localOnlyRate }}</span>
-          <span>Avg GPT calls/task: {{ metrics.avgGptCallsPerTask }}</span>
+          <span>Avg cloud calls/task: {{ metrics.avgCloudCallsPerTask }}</span>
         </div>
       </aside>
 
@@ -62,7 +62,9 @@
               <select name="mode">
                 <option value="auto">auto</option>
                 <option value="local">local</option>
-                <option value="gpt">gpt</option>
+                <option value="cloud">cloud</option>
+                <option value="pi">pi</option>
+                <option value="gpt">gpt (legacy)</option>
               </select>
               <button type="submit" data-label="Run Task">Run Task</button>
             </div>
@@ -84,12 +86,12 @@
           </div>
         </div>
 
-        <div id="detail-wrap" class="detail-wrap collapsed{% if not selected_task %} hidden{% endif %}">
+        <div id="detail-wrap" class="detail-wrap{% if not selected_task %} collapsed hidden{% endif %}">
           <div class="collapsible-head detail-collapsible-head">
             <h2>Task Details</h2>
-            <button type="button" id="task-detail-toggle" class="collapse-btn" aria-expanded="false" aria-controls="task-detail-body">▴</button>
+            <button type="button" id="task-detail-toggle" class="collapse-btn" aria-expanded="{{ 'true' if selected_task else 'false' }}" aria-controls="task-detail-body">{{ '▾' if selected_task else '▴' }}</button>
           </div>
-          <div id="task-detail-body" class="task-detail-body collapsed">
+          <div id="task-detail-body" class="task-detail-body{% if not selected_task %} collapsed{% endif %}">
           <div id="task-detail">
             {% if selected_task %}
               {% set task = selected_task %}
@@ -315,6 +317,41 @@
           }
         });
 
+        async function loadTaskDetail(taskId) {
+          if (!taskId) return;
+          const targetEl = document.getElementById("task-detail");
+          if (!targetEl) return;
+
+          if (detailWrap) detailWrap.classList.remove("hidden");
+          if (taskDetailBody) taskDetailBody.classList.remove("collapsed");
+          if (detailWrap) detailWrap.classList.remove("collapsed");
+          if (rightPanel) rightPanel.classList.remove("detail-collapsed");
+          if (taskDetailToggle) {
+            taskDetailToggle.textContent = "▾";
+            taskDetailToggle.setAttribute("aria-expanded", "true");
+          }
+
+          if (typeof htmx !== "undefined") {
+            htmx.ajax("GET", `/ui/tasks/${taskId}`, { target: "#task-detail", swap: "innerHTML" });
+            return;
+          }
+
+          try {
+            targetEl.innerHTML = "<p>Loading task details...</p>";
+            const res = await fetch(`/ui/tasks/${taskId}`, {
+              headers: { "HX-Request": "true" },
+              credentials: "same-origin",
+            });
+            if (!res.ok) throw new Error("Failed to load task details");
+            const html = await res.text();
+            targetEl.innerHTML = html;
+            renderDiffBlocks(targetEl);
+          } catch (error) {
+            targetEl.innerHTML = "<p class='error'>Failed to load task details.</p>";
+            showToast("Failed to load task details", "error");
+          }
+        }
+
         document.body.addEventListener("htmx:sendError", (evt) => {
           const form = evt.target && evt.target.closest ? evt.target.closest("form") : null;
           if (!form) return;
@@ -324,23 +361,9 @@
           showToast(label + " failed: network error", "error");
         });
 
-        // Reliable fallback for task-row clicks even after periodic HTMX list refreshes.
-        document.body.addEventListener("click", (evt) => {
-          const btn = evt.target && evt.target.closest ? evt.target.closest(".task-btn[data-task-id]") : null;
-          if (!btn) return;
-          evt.preventDefault();
-          const taskId = btn.dataset.taskId;
-          if (!taskId || typeof htmx === "undefined") return;
-          if (detailWrap) detailWrap.classList.remove("hidden");
-          if (taskDetailBody) taskDetailBody.classList.remove("collapsed");
-          if (detailWrap) detailWrap.classList.remove("collapsed");
-          if (rightPanel) rightPanel.classList.remove("detail-collapsed");
-          if (taskDetailToggle) {
-            taskDetailToggle.textContent = "▾";
-            taskDetailToggle.setAttribute("aria-expanded", "true");
-          }
-          htmx.ajax("GET", `/ui/tasks/${taskId}`, { target: "#task-detail", swap: "innerHTML" });
-        });
+        // Keep task row clicks native-first:
+        // - Anchor href provides hard fallback navigation (/ui?task_id=...)
+        // - HTMX enhances in-place detail loading when available.
         renderDiffBlocks(document);
         } catch (err) {
           console.error("UI bootstrap failed:", err);

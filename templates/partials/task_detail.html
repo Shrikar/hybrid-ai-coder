@@ -12,9 +12,9 @@
     <span class="confidence-badge">{{ conf_pct }}%</span>
   </p>
   <p><strong>Router Reason:</strong> {{ task.routerReason or "-" }}</p>
-  <p><strong>GPT Calls:</strong> {{ task.gptCallsUsed }}</p>
-  <p><strong>GPT Tokens:</strong> {{ task.gptTokenEstimate }}</p>
-  <p><strong>GPT Cost:</strong> {{ task.gptCostUsd }}</p>
+  <p><strong>Cloud Calls:</strong> {{ task.cloudCallsUsed }}</p>
+  <p><strong>Cloud Tokens:</strong> {{ task.cloudTokenEstimate }}</p>
+  <p><strong>Cloud Cost:</strong> {{ task.cloudCostUsd }}</p>
 
   {% if task.error %}
   <p class="error"><strong>Error:</strong> {{ task.error }}</p>
