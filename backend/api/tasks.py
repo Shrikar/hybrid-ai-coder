@@ -10,12 +10,14 @@ from fastapi import APIRouter, Header, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from backend.executors.ai_router_executor import AIRouterExecutor
-from backend.executors.gpt_executor import GPTExecutor
+from backend.executors.cloud_executor import CloudExecutor
 from backend.executors.ollama_executor import OllamaExecutor
+from backend.executors.pi_executor import PiExecutor
 from backend.models.task_models import TaskCreateRequest, TaskCreateResponse, TaskEvent, TaskRecord
 from backend.router.task_router import TaskRouter
 from backend.services.config_loader import ConfigLoader
 from backend.services.task_execution_service import TaskExecutionService
+from backend.services.task_worker import TaskWorker
 from backend.storage.task_store import TaskStore
 
 router = APIRouter()
@@ -40,6 +42,9 @@ _ai_router_executor = AIRouterExecutor(
 _router = TaskRouter(
     complexity_threshold=int(_routing_cfg.get("complexity_threshold", 50)),
     local_retry_limit=int(_routing_cfg.get("local_retry_limit", 2)),
+    max_cloud_calls=int(_routing_cfg.get("max_cloud_calls", _routing_cfg.get("max_gpt_calls", 2))),
+    enable_pi_mode=bool(_routing_cfg.get("enable_pi_mode", False)),
+    auto_use_pi=bool(_routing_cfg.get("auto_use_pi", False)),
     ai_executor=_ai_router_executor,
     ai_confidence_threshold=float(_ai_router_cfg.get("confidence_threshold", 0.55)),
 )
@@ -51,14 +56,34 @@ _local_executor = OllamaExecutor(
         "provider": _cfg.get("local_name", "ollama"),
     }
 )
-_gpt_executor = GPTExecutor(config=_cloud_cfg)
+_cloud_executor = CloudExecutor(config=_cloud_cfg)
+_pi_cfg = _full_cfg.get("pi", {})
+_pi_executor = PiExecutor(
+    config={
+        "command": _pi_cfg.get("command", "pi"),
+        "timeout": _pi_cfg.get("timeout", 120),
+        "prefer_embedded_bridge": _pi_cfg.get("prefer_embedded_bridge", True),
+        "bridge_script": _pi_cfg.get("bridge_script", ""),
+        "provider": _pi_cfg.get("provider"),
+        "model": _pi_cfg.get("model"),
+        "allow_npx_fallback": _pi_cfg.get("allow_npx_fallback", True),
+        "npm_package": _pi_cfg.get("npm_package", "@earendil-works/pi-coding-agent"),
+    }
+) if bool(_pi_cfg.get("enabled", False)) else None
 _service = TaskExecutionService(
     task_store=_task_store,
     router=_router,
     local_executor=_local_executor,
-    gpt_executor=_gpt_executor,
+    cloud_executor=_cloud_executor,
+    pi_executor=_pi_executor,
     local_retry_limit=int(_routing_cfg.get("local_retry_limit", 2)),
 )
+_worker: Optional[TaskWorker] = None
+
+
+def set_worker(worker: TaskWorker) -> None:
+    global _worker
+    _worker = worker
 
 
 def _require_local_token(x_local_token: Optional[str]) -> None:
@@ -71,7 +96,12 @@ def _require_local_token(x_local_token: Optional[str]) -> None:
 @router.post("", response_model=TaskCreateResponse)
 async def create_task(request: TaskCreateRequest, x_local_token: Optional[str] = Header(default=None)) -> TaskCreateResponse:
     _require_local_token(x_local_token)
-    record = await _service.create_and_execute(request)
+    record = _service.create_task(request)
+    if _worker is not None:
+        await _worker.enqueue(record.taskId)
+    else:
+        # Safe fallback for contexts where worker is not initialized.
+        await _service.execute_task(record.taskId)
     return TaskCreateResponse(taskId=record.taskId, status=record.status)
 
 
@@ -79,7 +109,13 @@ async def create_task(request: TaskCreateRequest, x_local_token: Optional[str] =
 async def resume_task(task_id: str, x_local_token: Optional[str] = Header(default=None)) -> TaskRecord:
     _require_local_token(x_local_token)
     try:
-        return await _service.resume_task(task_id)
+        task = await _service.resume_task(task_id)
+        if _worker is not None:
+            await _worker.enqueue(task.taskId)
+        else:
+            await _service.execute_task(task.taskId)
+            task = _task_store.get_task(task.taskId)
+        return task
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

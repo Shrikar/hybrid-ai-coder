@@ -4,13 +4,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TaskMode(str, Enum):
     auto = "auto"
+    cloud = "cloud"
     gpt = "gpt"
     local = "local"
+    pi = "pi"
 
 
 class TaskStatus(str, Enum):
@@ -27,6 +29,25 @@ class TaskCreateRequest(BaseModel):
     repoPath: str
     mode: TaskMode = TaskMode.auto
     attachments: list[dict[str, str]] = Field(default_factory=list)
+    legacyModeAliasUsed: bool = Field(default=False, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def mark_legacy_mode_alias(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            mode = values.get("mode")
+            if isinstance(mode, str) and mode.lower() == "gpt":
+                values["legacyModeAliasUsed"] = True
+        return values
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_mode_aliases(cls, value: Any) -> Any:
+        if isinstance(value, str) and value.lower() == "gpt":
+            return "cloud"
+        if value == TaskMode.gpt:
+            return TaskMode.cloud
+        return value
 
 
 class TaskCreateResponse(BaseModel):
@@ -75,6 +96,7 @@ class TaskRecord(BaseModel):
     prompt: str
     repoPath: str
     mode: TaskMode
+    attachments: list[dict[str, str]] = Field(default_factory=list)
     status: TaskStatus
     createdAt: datetime
     assignedModel: Optional[str] = None
@@ -83,6 +105,10 @@ class TaskRecord(BaseModel):
     routerConfidence: float = 0.0
     routerReason: Optional[str] = None
     complexityScore: int = 0
+    cloudCallsUsed: int = 0
+    cloudTokenEstimate: int = 0
+    cloudCostUsd: float = 0.0
+    # Backward-compat aliases. Kept in response payloads during transition.
     gptCallsUsed: int = 0
     gptTokenEstimate: int = 0
     gptCostUsd: float = 0.0
@@ -96,3 +122,21 @@ class TaskRecord(BaseModel):
     changedFiles: list[str] = Field(default_factory=list)
     validationSummary: ValidationSummary = Field(default_factory=ValidationSummary)
     completedAt: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def sync_legacy_cloud_fields(self):
+        # Canonical source is cloud* fields. Maintain gpt* aliases for compatibility.
+        if self.cloudCallsUsed == 0 and self.gptCallsUsed:
+            self.cloudCallsUsed = self.gptCallsUsed
+        if self.cloudTokenEstimate == 0 and self.gptTokenEstimate:
+            self.cloudTokenEstimate = self.gptTokenEstimate
+        if self.cloudCostUsd == 0.0 and self.gptCostUsd:
+            self.cloudCostUsd = self.gptCostUsd
+
+        self.gptCallsUsed = self.cloudCallsUsed
+        self.gptTokenEstimate = self.cloudTokenEstimate
+        self.gptCostUsd = self.cloudCostUsd
+
+        if self.mode == TaskMode.gpt:
+            self.mode = TaskMode.cloud
+        return self

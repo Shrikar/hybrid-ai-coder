@@ -11,11 +11,12 @@ from fastapi.templating import Jinja2Templates
 
 from backend.api import tasks as tasks_api
 from backend.models.task_models import TaskCreateRequest
+from backend.runtime_paths import templates_dir
 from backend.services.project_mode_service import ProjectModeService
 from backend.services.skill_catalog import SkillCatalog
 
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=str(templates_dir()))
 _catalog = SkillCatalog()
 _project_mode = ProjectModeService(
     tasks_api._service,
@@ -216,7 +217,11 @@ async def ui_create_task(
 ):
     parsed_attachments = await _parse_attachments(attachments or [])
     req = TaskCreateRequest(prompt=prompt, repoPath=repo_path, mode=mode, attachments=parsed_attachments)
-    await tasks_api._service.create_and_execute(req)
+    record = tasks_api._service.create_task(req)
+    if tasks_api._worker is not None:
+        await tasks_api._worker.enqueue(record.taskId)
+    else:
+        await tasks_api._service.execute_task(record.taskId)
     tasks = _tasks_with_pending_count()
     return templates.TemplateResponse("partials/task_list.html", {"request": request, "tasks": tasks})
 
@@ -266,7 +271,11 @@ async def _parse_attachments(files: list[UploadFile]) -> list[dict[str, str]]:
 @router.post("/skills/run", response_class=HTMLResponse)
 async def ui_run_skill(request: Request, skill_id: str = Form(...), repo_path: str = Form(...), user_input: str = Form("")):
     req = _catalog.build_task_request(skill_id=skill_id, repo_path=repo_path, user_input=user_input)
-    await tasks_api._service.create_and_execute(req)
+    record = tasks_api._service.create_task(req)
+    if tasks_api._worker is not None:
+        await tasks_api._worker.enqueue(record.taskId)
+    else:
+        await tasks_api._service.execute_task(record.taskId)
     tasks = _tasks_with_pending_count()
     return templates.TemplateResponse("partials/task_list.html", {"request": request, "tasks": tasks})
 
@@ -338,7 +347,11 @@ async def ui_approve_task(request: Request, task_id: str):
 @router.post("/tasks/{task_id}/resume", response_class=HTMLResponse)
 async def ui_resume_task(request: Request, task_id: str):
     try:
-        await tasks_api._service.resume_task(task_id)
+        task = await tasks_api._service.resume_task(task_id)
+        if tasks_api._worker is not None:
+            await tasks_api._worker.enqueue(task.taskId)
+        else:
+            await tasks_api._service.execute_task(task.taskId)
     except ValueError:
         pass
     return RedirectResponse(url=f"/ui?task_id={task_id}", status_code=303)

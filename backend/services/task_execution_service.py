@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from backend.executors.gpt_executor import GPTExecutor
+from backend.executors.cloud_executor import CloudExecutor
 from backend.executors.ollama_executor import OllamaExecutor
-from backend.models.task_models import ExecutorResult, TaskCreateRequest, TaskMode, TaskRecord, TaskStatus
+from backend.executors.pi_executor import PiExecutor
+from backend.models.task_models import ExecutorResult, TaskCreateRequest, TaskMode, TaskRecord, TaskStatus, ValidationSummary
 from backend.router.task_router import TaskRouter
 from backend.services.config_loader import ConfigLoader
 from backend.services.context_builder import ContextBuilder
@@ -23,13 +24,15 @@ class TaskExecutionService:
         task_store: TaskStore,
         router: TaskRouter,
         local_executor: OllamaExecutor,
-        gpt_executor: GPTExecutor,
+        cloud_executor: CloudExecutor,
+        pi_executor: Optional[PiExecutor] = None,
         local_retry_limit: int = 2,
     ) -> None:
         self.task_store = task_store
         self.router = router
         self.local_executor = local_executor
-        self.gpt_executor = gpt_executor
+        self.cloud_executor = cloud_executor
+        self.pi_executor = pi_executor
         self.local_retry_limit = local_retry_limit
         self.context_builder = ContextBuilder()
         self.subtask_planner = SubtaskPlanner()
@@ -58,11 +61,29 @@ class TaskExecutionService:
         self.webhook_dispatcher = WebhookDispatcher(cfg.get("webhooks", {}).get("task_events_url"))
 
     async def create_and_execute(self, request: TaskCreateRequest) -> TaskRecord:
+        # Backward-compatible helper for callers that still expect sync execution.
+        task = self.create_task(request)
+        return await self.execute_task(task.taskId)
+
+    def create_task(self, request: TaskCreateRequest) -> TaskRecord:
         task = self.task_store.create_task(request)
+        if request.legacyModeAliasUsed:
+            self._emit(
+                task.taskId,
+                "deprecation_warning",
+                "Mode 'gpt' is deprecated; use mode 'cloud'.",
+            )
+        self._emit(task.taskId, "task_queued", "Task queued for background execution")
+        return task
+
+    async def execute_task(self, task_id: str) -> TaskRecord:
+        task = self.task_store.get_task(task_id)
+        if task is None:
+            raise ValueError("Task not found")
         self._emit(task.taskId, "execution_started", "Task execution started")
         self.task_store.update_task(task.taskId, status=TaskStatus.executing)
-
-        return await self._run_task(task, attachments=request.attachments)
+        task = self.task_store.get_task(task.taskId)
+        return await self._run_task(task, attachments=task.attachments)
 
     async def resume_task(self, task_id: str) -> TaskRecord:
         task = self.task_store.get_task(task_id)
@@ -73,9 +94,10 @@ class TaskExecutionService:
             return task
 
         self._emit(task.taskId, "task_resume", "Task resume requested")
-        self.task_store.update_task(task.taskId, status=TaskStatus.executing, error=None, budgetExceeded=False)
+        self.task_store.update_task(task.taskId, status=TaskStatus.created, error=None, budgetExceeded=False)
         task = self.task_store.get_task(task.taskId)
-        return await self._run_task(task)
+        self._emit(task.taskId, "task_queued", "Task queued for background execution")
+        return task
 
     def approve_task(self, task_id: str) -> TaskRecord:
         pending = self.task_store.get_pending_approval(task_id)
@@ -102,9 +124,9 @@ class TaskExecutionService:
         start_index = max(0, task.currentSubtaskIndex)
         total_subtasks = len(subtasks)
         self.task_store.update_task(task.taskId, totalSubtasks=total_subtasks)
-        gpt_calls_used = task.gptCallsUsed
-        cumulative_tokens = task.gptTokenEstimate
-        cumulative_cost = task.gptCostUsd
+        cloud_calls_used = task.cloudCallsUsed
+        cumulative_tokens = task.cloudTokenEstimate
+        cumulative_cost = task.cloudCostUsd
         cumulative_changed_files: list[str] = list(task.changedFiles)
         last_error: Optional[str] = None
 
@@ -117,7 +139,7 @@ class TaskExecutionService:
             self._emit(task.taskId, "subtask_started", f"Starting {subtask.title}")
 
             while True:
-                # Local-first rule: in auto mode never force GPT from planner hints.
+                # Local-first rule: in auto mode never force cloud from planner hints.
                 # Router decides escalation only via retry/budget/risk logic.
                 model_mode = task.mode
 
@@ -126,7 +148,7 @@ class TaskExecutionService:
                     mode=model_mode,
                     riskHints=[],
                     retryCount=local_retries,
-                    gptCallsUsed=gpt_calls_used,
+                    cloudCallsUsed=cloud_calls_used,
                 )
                 selected_model = decision.model
                 selected_reason = decision.reason
@@ -139,7 +161,7 @@ class TaskExecutionService:
                 if has_image_attachments and selected_model == "local" and task.mode == TaskMode.auto:
                     local_has_vision = await self.local_executor.supports_vision()
                     if not local_has_vision:
-                        selected_model = "gpt"
+                        selected_model = "cloud"
                         selected_reason = "image_input_requires_vision_escalation"
                         selected_confidence = 1.0
 
@@ -151,17 +173,17 @@ class TaskExecutionService:
                     routerConfidence=selected_confidence,
                     routerReason=selected_reason,
                     complexityScore=selected_complexity,
-                    gptCallsUsed=gpt_calls_used,
+                    cloudCallsUsed=cloud_calls_used,
                     localRetries=local_retries,
                 )
                 self._emit(task.taskId, "route_decision", f"Routed subtask to {selected_model}", {"reason": selected_reason})
 
-                if selected_model == "gpt" and gpt_calls_used >= decision.budgetPolicy.maxGptCalls:
-                    last_error = "Manual review required: GPT budget exceeded"
+                if selected_model in {"cloud", "pi"} and cloud_calls_used >= decision.budgetPolicy.maxCloudCalls:
+                    last_error = "Manual review required: cloud budget exceeded"
                     break
 
                 exec_context = {"repoPath": task.repoPath, "attachments": attachments or []}
-                if selected_model == "gpt":
+                if selected_model in {"cloud", "pi"}:
                     exec_context = self.context_builder.build_escalation_context(
                         prompt=subtask.prompt,
                         repo_path=task.repoPath,
@@ -174,8 +196,8 @@ class TaskExecutionService:
 
                 run_prompt = self._build_execution_prompt(subtask, task.repoPath)
                 result = await self._execute(selected_model, run_prompt, exec_context)
-                if selected_model == "gpt":
-                    gpt_calls_used += 1
+                if selected_model in {"cloud", "pi"}:
+                    cloud_calls_used += 1
                 if result.result:
                     self._emit(
                         task.taskId,
@@ -205,9 +227,9 @@ class TaskExecutionService:
                             requiresApproval=True,
                             currentSubtaskIndex=i,
                             totalSubtasks=total_subtasks,
-                            gptCallsUsed=gpt_calls_used,
-                            gptTokenEstimate=cumulative_tokens,
-                            gptCostUsd=round(cumulative_cost, 6),
+                            cloudCallsUsed=cloud_calls_used,
+                            cloudTokenEstimate=cumulative_tokens,
+                            cloudCostUsd=round(cumulative_cost, 6),
                             result="Pending approval before apply",
                             error=None,
                         )
@@ -235,7 +257,7 @@ class TaskExecutionService:
                             local_retries += 1
                             if local_retries <= self.local_retry_limit:
                                 continue
-                        elif gpt_calls_used < decision.budgetPolicy.maxGptCalls:
+                        elif cloud_calls_used < decision.budgetPolicy.maxCloudCalls:
                             continue
                         break
 
@@ -250,7 +272,7 @@ class TaskExecutionService:
                     local_retries += 1
                     if local_retries <= self.local_retry_limit:
                         continue
-                elif gpt_calls_used < decision.budgetPolicy.maxGptCalls:
+                elif cloud_calls_used < decision.budgetPolicy.maxCloudCalls:
                     continue
 
                 break
@@ -258,12 +280,12 @@ class TaskExecutionService:
             if not subtask_done:
                 return self._finalize_failure(
                     task.taskId,
-                    gpt_calls_used,
+                    cloud_calls_used,
                     local_retries,
                     last_error,
                     changed_files=cumulative_changed_files,
-                    gpt_cost_usd=cumulative_cost,
-                    gpt_tokens=cumulative_tokens,
+                    cloud_cost_usd=cumulative_cost,
+                    cloud_tokens=cumulative_tokens,
                 )
 
         updated = self.task_store.update_task(
@@ -271,9 +293,9 @@ class TaskExecutionService:
             status=TaskStatus.completed,
             currentSubtaskIndex=total_subtasks,
             totalSubtasks=total_subtasks,
-            gptCallsUsed=gpt_calls_used,
-            gptTokenEstimate=cumulative_tokens,
-            gptCostUsd=round(cumulative_cost, 6),
+            cloudCallsUsed=cloud_calls_used,
+            cloudTokenEstimate=cumulative_tokens,
+            cloudCostUsd=round(cumulative_cost, 6),
             localRetries=0,
             result="Subtasks completed and files applied",
             error=None,
@@ -284,8 +306,19 @@ class TaskExecutionService:
         return updated
 
     async def _execute(self, model: str, prompt: str, context: dict[str, Any]) -> ExecutorResult:
-        if model == "gpt":
-            return await self.gpt_executor.execute(prompt=prompt, context=context)
+        if model == "cloud":
+            return await self.cloud_executor.execute(prompt=prompt, context=context)
+        if model == "pi":
+            if self.pi_executor is None:
+                return ExecutorResult(
+                    error="Pi execution is not configured",
+                    validationSummary=ValidationSummary(
+                        passed=False,
+                        checksRun=["pi_call"],
+                        failedChecks=["pi_call"],
+                    ),
+                )
+            return await self.pi_executor.execute(prompt=prompt, context=context)
         return await self.local_executor.execute(prompt=prompt, context=context)
 
     def _validate_result(self, result: ExecutorResult):
@@ -307,26 +340,26 @@ class TaskExecutionService:
     def _finalize_failure(
         self,
         task_id: str,
-        gpt_calls_used: int,
+        cloud_calls_used: int,
         local_retries: int,
         error: Optional[str],
         changed_files: Optional[list[str]] = None,
-        gpt_cost_usd: float = 0.0,
-        gpt_tokens: int = 0,
+        cloud_cost_usd: float = 0.0,
+        cloud_tokens: int = 0,
     ) -> TaskRecord:
         current = self.task_store.get_task(task_id)
         budget_policy = self.router.budget_policy()
-        budget_exceeded = gpt_calls_used >= budget_policy.maxGptCalls
+        budget_exceeded = cloud_calls_used >= budget_policy.maxCloudCalls
         final_error = error or "Manual review required"
         if budget_exceeded:
-            final_error = "Manual review required: GPT budget exceeded"
+            final_error = "Manual review required: cloud budget exceeded"
 
         updated = self.task_store.update_task(
             task_id,
             status=TaskStatus.failed,
-            gptCallsUsed=gpt_calls_used,
-            gptTokenEstimate=gpt_tokens,
-            gptCostUsd=round(gpt_cost_usd, 6),
+            cloudCallsUsed=cloud_calls_used,
+            cloudTokenEstimate=cloud_tokens,
+            cloudCostUsd=round(cloud_cost_usd, 6),
             localRetries=local_retries,
             budgetExceeded=budget_exceeded,
             error=final_error,

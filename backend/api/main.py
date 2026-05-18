@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.health import router as health_router
-from backend.api.tasks import router as tasks_router
 from backend.api.skills import router as skills_router
+from backend.api.tasks import router as tasks_router
+from backend.api import tasks as tasks_api
+from backend.runtime_paths import static_dir
 from backend.services.config_loader import ConfigLoader
+from backend.services.task_worker import TaskWorker
 from backend.storage.task_store import TaskStore
 from backend.ui.routes import router as ui_router
 
@@ -23,6 +28,13 @@ _security = _cfg.get("security", {})
 _allow_non_localhost = bool(_security.get("allow_non_localhost", False))
 _storage_cfg = _cfg.get("storage", {})
 _task_store = TaskStore(db_path=_storage_cfg.get("task_db_path"))
+_worker = TaskWorker(
+    service=tasks_api._service,
+    store=tasks_api._task_store,
+    max_retries=int(_cfg.get("worker", {}).get("max_retries", 2)),
+    retry_delay_seconds=float(_cfg.get("worker", {}).get("retry_delay_seconds", 1.5)),
+)
+tasks_api.set_worker(_worker)
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +48,7 @@ app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(skills_router, prefix="/api/v1/skills", tags=["skills"])
 app.include_router(health_router, prefix="/api/v1/health", tags=["health"])
 app.include_router(ui_router, prefix="/ui", tags=["ui"])
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
 
 
 @app.middleware("http")
@@ -57,4 +69,13 @@ async def root() -> dict[str, str]:
 
 @app.on_event("startup")
 async def startup_recovery() -> None:
-    _task_store.recover_interrupted_tasks()
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
+    await _worker.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_worker() -> None:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
+    await _worker.stop()

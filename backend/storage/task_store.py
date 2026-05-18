@@ -94,6 +94,7 @@ class TaskStore:
             prompt=request.prompt,
             repoPath=request.repoPath,
             mode=request.mode,
+            attachments=request.attachments,
             status=TaskStatus.created,
             createdAt=datetime.utcnow(),
         )
@@ -195,10 +196,14 @@ class TaskStore:
         count = 0
         for task in tasks:
             if task.status == TaskStatus.executing:
-                self.update_task(task.taskId, status=TaskStatus.failed, error="Interrupted during previous run")
-                self.add_event(task.taskId, "task_interrupted", "Marked failed after restart")
+                self.update_task(task.taskId, status=TaskStatus.created, error="Recovered after restart")
+                self.add_event(task.taskId, "task_recovered", "Recovered task and re-queued after restart")
                 count += 1
         return count
+
+    def list_tasks_by_status(self, statuses: list[TaskStatus]) -> list[TaskRecord]:
+        wanted = {s.value if isinstance(s, TaskStatus) else str(s) for s in statuses}
+        return [t for t in self.list_tasks() if t.status.value in wanted]
 
     def savings_metrics(self) -> dict[str, Union[float, int]]:
         tasks = self.list_tasks()
@@ -226,24 +231,32 @@ class TaskStore:
                 "totalTasks": 0,
                 "localOnlyTasks": 0,
                 "localOnlyRate": 0.0,
+                "avgCloudTokensPerTask": 0.0,
+                "avgCloudCallsPerTask": 0.0,
+                "avgCloudCostPerTaskUsd": 0.0,
                 "avgGptTokensPerTask": 0.0,
                 "avgGptCallsPerTask": 0.0,
                 "avgGptCostPerTaskUsd": 0.0,
             }
 
-        local_only = sum(1 for t in tasks if t.gptCallsUsed == 0 and t.assignedModel == "local")
-        total_tokens = sum(t.gptTokenEstimate for t in tasks)
-        total_gpt_calls = sum(t.gptCallsUsed for t in tasks)
-        total_gpt_cost = sum(t.gptCostUsd for t in tasks)
+        local_only = sum(1 for t in tasks if t.cloudCallsUsed == 0 and t.assignedModel == "local")
+        total_tokens = sum(t.cloudTokenEstimate for t in tasks)
+        total_cloud_calls = sum(t.cloudCallsUsed for t in tasks)
+        total_cloud_cost = sum(t.cloudCostUsd for t in tasks)
 
-        return {
+        metrics = {
             "totalTasks": total,
             "localOnlyTasks": local_only,
             "localOnlyRate": round(local_only / total, 4),
-            "avgGptTokensPerTask": round(total_tokens / total, 2),
-            "avgGptCallsPerTask": round(total_gpt_calls / total, 2),
-            "avgGptCostPerTaskUsd": round(total_gpt_cost / total, 6),
+            "avgCloudTokensPerTask": round(total_tokens / total, 2),
+            "avgCloudCallsPerTask": round(total_cloud_calls / total, 2),
+            "avgCloudCostPerTaskUsd": round(total_cloud_cost / total, 6),
         }
+        # Backward-compatible aliases.
+        metrics["avgGptTokensPerTask"] = metrics["avgCloudTokensPerTask"]
+        metrics["avgGptCallsPerTask"] = metrics["avgCloudCallsPerTask"]
+        metrics["avgGptCostPerTaskUsd"] = metrics["avgCloudCostPerTaskUsd"]
+        return metrics
 
     def _upsert(self, task: TaskRecord) -> None:
         payload = json.dumps(task.model_dump(mode="json"), default=str)
